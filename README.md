@@ -357,6 +357,338 @@ Gradient boosting is the best algorithm for **tabular data** — structured rows
 | [KNN & Naive Bayes](https://github.com/shambhavishinde/knn-naive-bayes) | KNN + NB | Twitter sentiment | 80% |
 | This project | XGBoost + LightGBM + CatBoost | MNIST digits | 97.68% |
 
-**Next:** Neural Networks → Deep Learning → Transformers → LLM Applications
+# Data Preprocessing — Label Encoding & Normalization
+
+## Overview
+
+Before feeding data into any machine learning model, raw data must be preprocessed. Two of the most fundamental preprocessing techniques are **Label Encoding** (converting text to numbers) and **Normalization** (scaling numbers to the same range).
+
+This document explains both concepts with examples drawn from real projects.
 
 ---
+
+## Why Preprocessing Matters
+
+Machine learning models only understand numbers. Real world data contains:
+- Text categories: city names, company names, delivery status
+- Numbers on vastly different scales: shipping cost (₹1,000-₹100,000) vs quantity (1-50)
+- Images: raw pixel bytes instead of usable arrays
+
+Preprocessing converts messy real world data into clean numbers a model can learn from.
+
+---
+
+## Part 1 — Label Encoding
+
+### What It Is
+
+Converting text categories into integers.
+
+```python
+# Before encoding
+city = ['Mumbai', 'Delhi', 'Bangalore', 'Mumbai', 'Delhi']
+
+# After label encoding
+city = [2, 1, 0, 2, 1]
+```
+
+sklearn assigns numbers alphabetically:
+```
+Bangalore → 0
+Delhi     → 1
+Mumbai    → 2
+```
+
+### Code
+
+```python
+from sklearn.preprocessing import LabelEncoder
+
+le = LabelEncoder()
+df['city_enc'] = le.fit_transform(df['city'])
+```
+
+---
+
+### The Problem With Label Encoding
+
+It implies an order that doesn't exist:
+```
+Bangalore = 0
+Delhi     = 1
+Mumbai    = 2
+```
+
+The model might think Mumbai (2) is "greater than" Bangalore (0) — which makes no sense for city names. This is called **ordinal assumption** — assuming categories have a natural rank.
+
+---
+
+### Fix — One Hot Encoding
+
+Creates a separate binary column for each category:
+
+```
+Original:          One Hot Encoded:
+city               Bangalore  Delhi  Mumbai
+Mumbai      →          0        0      1
+Delhi       →          0        1      0
+Bangalore   →          1        0      0
+```
+
+```python
+# Using pandas
+df_encoded = pd.get_dummies(df['city'])
+
+# Using sklearn
+from sklearn.preprocessing import OneHotEncoder
+encoder = OneHotEncoder()
+encoded = encoder.fit_transform(df[['city']])
+```
+
+No false ordering — each city is treated as completely independent.
+
+---
+
+### When to Use Which
+
+| Situation | Use |
+|---|---|
+| Categories have natural order (small/medium/large) | Label Encoding |
+| Categories have no order (city, color, company) | One Hot Encoding |
+| Tree based models (Decision Tree, Random Forest, XGBoost) | Label Encoding is fine — trees don't assume order |
+| Linear models (Linear/Logistic Regression, SVM) | One Hot Encoding — these assume numeric order |
+| Many unique categories (100+ cities) | Label Encoding — one hot creates too many columns |
+| Few unique categories (< 10) | One Hot Encoding |
+
+---
+
+### Real Project Example
+
+From the shipment delay project — converting logistics company and city names to numbers:
+
+```python
+le = LabelEncoder()
+df['logistics_company_enc'] = le.fit_transform(df['logistics_company'])
+df['origin_city_enc'] = le.fit_transform(df['origin_city'])
+df['destination_city_enc'] = le.fit_transform(df['destination_city'])
+```
+
+Used label encoding here because:
+- Tree based models (Decision Tree, Random Forest) don't assume numeric order
+- Cities had many unique values — one hot would create hundreds of columns
+
+---
+
+### CatBoost — Native Categorical Handling
+
+CatBoost eliminates the need for label encoding entirely:
+
+```python
+# XGBoost/LightGBM — manual encoding required
+df['city_enc'] = LabelEncoder().fit_transform(df['city'])
+model.fit(X_train, y_train)
+
+# CatBoost — pass text columns directly
+model.fit(X_train, y_train, cat_features=['city', 'logistics_company'])
+```
+
+CatBoost handles the encoding internally using a technique called **target statistics** — more sophisticated than simple label encoding.
+
+---
+
+## Part 2 — Normalization
+
+### What It Is
+
+Scaling numeric features to the same range so no single feature dominates due to its magnitude.
+
+### The Problem Without Normalization
+
+```
+Feature 1: shipping_cost → values between ₹1,000 and ₹100,000
+Feature 2: quantity      → values between 1 and 50
+```
+
+The model sees shipping_cost as 2,000× more important just because the numbers are bigger — even if quantity is equally predictive. The scale of a feature should not determine its importance.
+
+---
+
+### Two Types of Normalization
+
+#### Min-Max Scaling — scales to 0-1 range
+
+```python
+from sklearn.preprocessing import MinMaxScaler
+
+scaler = MinMaxScaler()
+X_scaled = scaler.fit_transform(X)
+```
+
+```
+Original: [1000, 50000, 100000]
+Scaled:   [0.0,  0.49,  1.0]
+```
+
+Formula:
+```
+scaled = (value - min) / (max - min)
+```
+
+Best when you know the data has fixed bounds (like pixel values 0-255).
+
+#### Standard Scaling — scales to mean=0, standard deviation=1
+
+```python
+from sklearn.preprocessing import StandardScaler
+
+scaler = StandardScaler()
+X_scaled = scaler.fit_transform(X)
+```
+
+```
+Original: [1000, 50000, 100000]
+Scaled:   [-1.2,  0.0,   1.2]
+```
+
+Formula:
+```
+scaled = (value - mean) / std_deviation
+```
+
+Best when data follows a normal distribution. Most commonly used in production.
+
+---
+
+### When to Normalize
+
+| Algorithm | Normalize? | Why |
+|---|---|---|
+| SVM | ✅ Always | Distance based — scale affects margin calculation |
+| KNN | ✅ Always | Distance based — large features dominate neighbor search |
+| Neural Networks | ✅ Always | Gradient descent converges faster |
+| Linear Regression | ✅ Recommended | Faster convergence, stable coefficients |
+| Logistic Regression | ✅ Recommended | Faster convergence |
+| Decision Tree | ❌ Not needed | Tree splits don't care about scale |
+| Random Forest | ❌ Not needed | Ensemble of trees |
+| XGBoost / LightGBM | ❌ Not needed | Tree based, scale invariant |
+| CatBoost | ❌ Not needed | Tree based, scale invariant |
+
+**Rule of thumb:** Normalize for distance based and gradient based algorithms. Skip for tree based algorithms.
+
+---
+
+### Real Project Examples
+
+**SVM project — StandardScaler for text features:**
+```python
+# Not needed for TF-IDF since it already produces normalized vectors
+# But for numeric features:
+from sklearn.preprocessing import StandardScaler
+scaler = StandardScaler()
+X_train_scaled = scaler.fit_transform(X_train)
+X_test_scaled = scaler.transform(X_test)
+```
+
+**MNIST project — pixel normalization:**
+```python
+# Divide by 255 to scale pixel values from 0-255 to 0-1
+X_train = X_train / 255.0
+X_test = X_test / 255.0
+```
+
+Simple division works here because pixel values have a known fixed range (0-255).
+
+---
+
+### The Critical Rule — Fit on Train, Transform Test
+
+This is the most important rule in preprocessing:
+
+```python
+# ✅ Correct order — no data leakage
+X_train, X_test = train_test_split(X)
+
+scaler.fit(X_train)                      # learn scale from training data only
+X_train_scaled = scaler.transform(X_train)
+X_test_scaled = scaler.transform(X_test) # apply same scale to test
+
+# ❌ Wrong — data leakage
+scaler.fit(X)                            # test data influences the scale
+X_train, X_test = train_test_split(X_scaled)
+```
+
+If you fit the scaler on the full dataset:
+- Test data influences the mean and standard deviation
+- The model indirectly "sees" test data during training
+- Your evaluation metrics are optimistically biased
+
+**Same rule applies to:**
+- `StandardScaler` — fit on train only
+- `MinMaxScaler` — fit on train only
+- `TfidfVectorizer` — fit on train only
+- `LabelEncoder` — fit on train only
+
+---
+
+## Summary Table
+
+| Technique | What it does | When to use |
+|---|---|---|
+| Label Encoding | Text → integers | Tree models, many categories, ordered categories |
+| One Hot Encoding | Text → binary columns | Linear models, few categories, unordered categories |
+| Min-Max Scaling | Scale to 0-1 | Known bounds, Neural Networks, pixel values |
+| Standard Scaling | Scale to mean=0 std=1 | Unknown bounds, SVM, KNN, Linear models |
+| Divide by constant | Simple scaling | Pixel values (/255), known fixed ranges |
+
+---
+
+## Common Mistakes
+
+**Mistake 1 — Fitting scaler on full dataset before split:**
+```python
+# ❌ Wrong
+X_scaled = scaler.fit_transform(X)
+X_train, X_test = train_test_split(X_scaled)
+```
+
+**Mistake 2 — Not encoding categorical features for linear models:**
+```python
+# ❌ Wrong — passing text to logistic regression
+model.fit(df[['city', 'company']], y)
+```
+
+**Mistake 3 — One hot encoding high cardinality features:**
+```python
+# ❌ Wrong — 500 unique cities creates 500 columns
+pd.get_dummies(df['city'])  # when city has 500 unique values
+```
+
+**Mistake 4 — Normalizing tree based models unnecessarily:**
+```python
+# ❌ Unnecessary — XGBoost doesn't need this
+scaler.fit_transform(X)
+xgb_model.fit(X_scaled, y)  # wasted computation
+```
+
+---
+
+## PM Perspective
+
+Preprocessing decisions are product decisions — they affect model performance, engineering complexity, and maintenance cost.
+
+**Label encoding vs one hot encoding:**
+- One hot encoding doubles or triples your feature count — larger models, more memory, slower inference
+- For a product with 500 cities, label encoding is the pragmatic choice even for linear models
+
+**Normalization in production:**
+- The scaler must be saved and deployed alongside the model
+- When new data arrives with values outside the training range (new city, extreme price) — your scaler needs updating
+- This is called **distribution shift** — a major source of model degradation in production
+
+**What to monitor after launch:**
+- Feature distributions — are new values within the training range?
+- Encoding coverage — are new categories appearing that weren't in training?
+- Scale drift — are feature scales changing over time (inflation affecting prices)?
+
+**Key insight:** Preprocessing is not a one-time step — it's an ongoing maintenance responsibility. As a PM you need to plan for retraining pipelines and data validation before launching any ML feature.
+
